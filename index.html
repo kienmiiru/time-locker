@@ -6,15 +6,32 @@
     <title>Time-Locker</title>
 </head>
 <body>
-    <div>
+    <fieldset style="width:fit-content">
+        <legend>Lock a file</legend>
+        <p>Select a file</p>
         <input type="file" name="file" id="file">
-        <input type="number" name="t" id="t">
+        <p>Choose the amount of computation (squaring) needed to unlock the file</p>
+        <input type="number" name="t" id="t" value="100000">
+        <button onclick="increaseTBy(-(2n**32n))">-2<sup>32</sup></button>
+        <button onclick="increaseTBy(-(2n**28n))">-2<sup>28</sup></button>
+        <button onclick="increaseTBy(-(2n**24n))">-2<sup>24</sup></button>
+        <button onclick="increaseTBy(2n**24n)">+2<sup>24</sup></button>
+        <button onclick="increaseTBy(2n**28n)">+2<sup>28</sup></button>
+        <button onclick="increaseTBy(2n**32n)">+2<sup>32</sup></button>
+        <p id="estimation">Please run speedtest to estimate time needed for unlocking</p>
         <button id="lock">Lock</button>
-    </div>
-    <div>
+    </fieldset>
+    <fieldset style="width:fit-content">
+        <legend>Run speedtest</legend>
+        <p id="test-result">Click the button below</p>
+        <button id="speedtest">Test speed</button>
+    </fieldset>
+    <fieldset style="width:fit-content">
+        <legend>Unlock a file</legend>
         <input type="file" name="puzzle" id="puzzle">
         <button id="unlock">Unlock</button>
-    </div>
+        <progress id="progress" max="1000" value="0" style="width:100%"></progress>
+    </fieldset>
     <script src="./script.js" type="module"></script>
 </body>
 </html>

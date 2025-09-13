@@ -1,5 +1,6 @@
 import * as asn1js from 'https://cdn.jsdelivr.net/npm/asn1js@3.0.6/+esm'
-window.asn1js = asn1js
+
+let squaringPerSecond = 0
 
 function uint8ArrayToInteger(arr) {
     return BigInt('0x' + arr.toHex())
@@ -44,7 +45,7 @@ async function encryptAesGcm(key, plaintext) {
         plaintext
     )
 
-    return { ciphertext, iv: iv.buffer }
+    return { ciphertext, iv }
 }
 
 async function decryptAesGcm(key, ciphertext, iv) {
@@ -75,11 +76,11 @@ function urlB64toInteger(b64) {
     return uint8ArrayToInteger(Uint8Array.fromBase64(b64))
 }
 
-async function generateRsaKey() {
+async function generateRsaKey(modulusSize=2048) {
     let key = await crypto.subtle.generateKey(
       {
         name: "RSA-OAEP",
-        modulusLength: 2048,
+        modulusLength: modulusSize,
         publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
         hash: "SHA-256",
       },
@@ -134,12 +135,12 @@ function encodePuzzle(puzzle) {
     let sequence = new asn1js.Sequence({
         value: [
             // Using string doesn't work
-            new asn1js.Integer({ valueHex: integerToUint8Array(puzzle.n) }),
-            new asn1js.Integer({ valueHex: integerToUint8Array(puzzle.a) }),
-            new asn1js.Integer({ valueHex: integerToUint8Array(puzzle.t) }),
+            new asn1js.OctetString({ valueHex: integerToUint8Array(puzzle.n) }),
+            new asn1js.OctetString({ valueHex: integerToUint8Array(puzzle.a) }),
+            new asn1js.OctetString({ valueHex: integerToUint8Array(puzzle.t) }),
             new asn1js.OctetString({ valueHex: puzzle.ciphertext }),
             new asn1js.OctetString({ valueHex: puzzle.iv }),
-            new asn1js.Integer({ valueHex: integerToUint8Array(puzzle.encryptedKey) })
+            new asn1js.OctetString({ valueHex: integerToUint8Array(puzzle.encryptedKey) })
         ]
     })
 
@@ -149,15 +150,23 @@ function encodePuzzle(puzzle) {
 function decodePuzzle(buffer) {
     let asn1 = asn1js.fromBER(buffer)
     let seq = asn1.result
+    console.log(seq)
 
     return {
         n: uint8ArrayToInteger(seq.valueBlock.value[0].valueBlock.valueHexView),
         a: uint8ArrayToInteger(seq.valueBlock.value[1].valueBlock.valueHexView),
         t: uint8ArrayToInteger(seq.valueBlock.value[2].valueBlock.valueHexView),
-        ciphertext: new Uint8Array(seq.valueBlock.value[3].valueBlock.valueHex),
-        iv: new Uint8Array(seq.valueBlock.value[4].valueBlock.valueHex),
+        ciphertext: seq.valueBlock.value[3].valueBlock.valueHexView,
+        iv: seq.valueBlock.value[4].valueBlock.valueHexView,
         encryptedKey: uint8ArrayToInteger(seq.valueBlock.value[5].valueBlock.valueHexView)
     }
+}
+
+window.increaseTBy = function (num) {
+    let t = BigInt(document.querySelector('#t').value)
+    t += num
+    document.querySelector('#t').value = t.toString()
+    updateApproximation()
 }
 
 async function lock(t) {
@@ -190,7 +199,8 @@ async function lock(t) {
     let aElem = document.createElement('a')
     aElem.href = url
     aElem.download = file.name + '_locked'
-    aElem.click()
+    aElem.text = 'Save as puzzle'
+    fileElem.parentElement.appendChild(aElem)
 }
 
 document.querySelector('#lock').addEventListener('click', () => {
@@ -199,18 +209,22 @@ document.querySelector('#lock').addEventListener('click', () => {
 })
 
 async function unlock() {
+    let progressElem = document.querySelector('#progress')
     let fileElem = document.querySelector('#puzzle')
     let file = fileElem.files[0]
     let fileBuffer = await file.arrayBuffer()
 
     let puzzle = decodePuzzle(fileBuffer)
+    console.log(puzzle)
     let { n, a, t, ciphertext, iv, encryptedKey } = puzzle
+    let originalT = t
 
     let squaringWorker = new Worker('./squaring.js')
     squaringWorker.postMessage({ n, a, t })
     squaringWorker.addEventListener('message', async (e) => {
         a = e.data.a
         t = e.data.t
+        progressElem.value = 1000 - parseInt(1000n*t/originalT)
 
         // Computation is complete, a is now a^2^t
         if (t == 0) {
@@ -228,11 +242,79 @@ async function unlock() {
             let aElem = document.createElement('a')
             aElem.href = url
             aElem.download = file.name.endsWith('_locked') ? file.name.slice(0, -7) : file.name
-            aElem.click()
+            aElem.text = 'Save unlocked file'
+            fileElem.parentElement.appendChild(aElem)
         }
     })
 }
 
+function convertSecondsToTimeUnits(totalSeconds) {
+    let units = [
+        { label: 'year', seconds: 365 * 24 * 60 * 60 },
+        { label: 'month', seconds: (365 * 24 * 60 * 60) / 12 },
+        { label: 'day', seconds: 24 * 60 * 60 },
+        { label: 'hour', seconds: 60 * 60 },
+        { label: 'minute', seconds: 60 },
+        { label: 'second', seconds: 1 }
+    ]
+
+    let parts = []
+
+    for (let { label, seconds } of units) {
+        let value = Math.floor(totalSeconds / seconds)
+        if (value > 0) {
+            parts.push(`${value} ${label}${value > 1 ? 's' : ''}`)
+            totalSeconds %= seconds;
+        }
+    }
+
+    return parts.length ? parts.join(' ') : '0 seconds'
+}
+
+function updateApproximation() {
+    if (squaringPerSecond == 0) return
+    let t = parseInt(document.querySelector('#t').value)
+    let timeNeededInSecond = Math.round(t / squaringPerSecond)
+
+    document.querySelector('#estimation').innerText = `Time needed to unlock: ~${convertSecondsToTimeUnits(timeNeededInSecond)}`
+}
+
+document.querySelector('#t').addEventListener('input', () => {
+    updateApproximation()
+})
+
 document.querySelector('#unlock').addEventListener('click', () => {
     unlock()
+})
+
+document.querySelector('#speedtest').addEventListener('click', async () => {
+    let [n, _, __] = await generateRsaKey(1024)
+    let a = await generateRandomBigIntBelow(n)
+    let t = 200000
+    let squaringWorker = new Worker('./squaring.js')
+
+    document.querySelector('#test-result').innerText = `Running test...`
+
+    let startTime = performance.now()
+    squaringWorker.postMessage({ n, a, t })
+    squaringWorker.addEventListener('message', e => {
+        if (e.data.t == 0) {
+            let timeTaken = performance.now() - startTime
+            squaringPerSecond = Math.round(1000*t / timeTaken)
+            document.querySelector('#test-result').innerText = `Your machine can run ~${squaringPerSecond} squaring every second`
+            updateApproximation()
+        }
+    })
+
+    // let originalT = t
+    // squaringWorker.postMessage({ n, a, t })
+    // squaringWorker.addEventListener('message', e => {
+    //     t = e.data.t
+    // })
+
+    // setTimeout(() => {
+    //     squaringWorker.terminate()
+    //     let squaringDone = originalT - t
+    //     document.querySelector('#test-result').innerText = `Your machine can run ~${squaringDone} squaring every second`
+    // }, 1000)
 })
